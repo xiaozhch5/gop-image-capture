@@ -1,0 +1,124 @@
+import (
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+)
+
+type Hit struct {
+	ID              int    `json:"id"`
+	PageURL         string `json:"pageURL"`
+	Type            string `json:"type"`
+	Tags            string `json:"tags"`
+	PreviewURL      string `json:"previewURL"`
+	PreviewWidth    int    `json:"previewWidth"`
+	PreviewHeight   int    `json:"previewHeight"`
+	WebformatURL    string `json:"webformatURL"`
+	WebformatWidth  int    `json:"webformatWidth"`
+	WebformatHeight int    `json:"webformatHeight"`
+	LargeImageURL   string `json:"largeImageURL"`
+	FullHDURL       string `json:"fullHDURL"`
+	ImageURL        string `json:"imageURL"`
+	ImageWidth      int    `json:"imageWidth"`
+	ImageHeight     int    `json:"imageHeight"`
+	ImageSize       int    `json:"imageSize"`
+	Views           int    `json:"views"`
+	Downloads       int    `json:"downloads"`
+	Likes           int    `json:"likes"`
+	Comments        int    `json:"comments"`
+	UserID          int    `json:"user_id"`
+	User            string `json:"user"`
+	UserImageURL    string `json:"userImageURL"`
+}
+
+type Result struct {
+	Total     int   `json:"total"`
+	TotalHits int   `json:"totalHits"`
+	Hits      []Hit `json:"hits"`
+}
+
+func CreatePathIfNotExists(path string) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		os.Mkdir(path, os.ModePerm)
+	}
+}
+
+func DownloadImages(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method == "GET" {
+		t, _ := template.ParseFiles("downloadImages.gtpl")
+		log.Println(t.Execute(w, nil))
+	} else {
+		err := r.ParseForm()
+		if err != nil {
+			log.Fatal("ParseForm: ", err)
+		}
+
+		println("key:", r.Form["key"])
+		println("q:", r.Form["q"])
+		println("image_type:", r.Form["image_type"])
+		println("save_path:", r.Form["save_path"])
+
+		_, keyOk := r.Form["key"]
+		_, qOk := r.Form["q"]
+		_, imageTypeOk := r.Form["image_type"]
+		_, savePathOk := r.Form["save_path"]
+		if !keyOk || !qOk || !imageTypeOk || !savePathOk {
+			fmt.Fprintf(w, "请输入正确的参数")
+			return
+		}
+
+		resp, err := http.Get("https://pixabay.com/api/?key=" + r.Form["key"][0] + "&q=" + r.Form["q"][0] + "&image_type=" + r.Form["image_type"][0])
+
+		if err != nil {
+			panic(err)
+		}
+
+		var res Result
+
+		defer resp.Body.Close()
+
+		body, _ := ioutil.ReadAll(resp.Body)
+
+		json.Unmarshal(body, &res)
+		for i, hit := range res.Hits {
+			println(i, hit.LargeImageURL)
+
+			var iURLSplit = strings.Split(hit.LargeImageURL, "/")
+
+			imageResp, err := http.Get(hit.LargeImageURL)
+
+			defer resp.Body.Close()
+
+			CreatePathIfNotExists(r.Form["save_path"][0])
+
+			if err != nil {
+				panic(err)
+			}
+
+			out, err := os.Create(r.Form["save_path"][0] + iURLSplit[len(iURLSplit)-1])
+			if err != nil {
+				panic(err)
+			}
+			defer out.Close()
+			_, err = io.Copy(out, imageResp.Body)
+			if err != nil {
+				panic(err)
+			}
+		}
+		fmt.Fprintf(w, "图片下载完成,下载路径为:"+r.Form["save_path"][0])
+	}
+}
+
+http.HandleFunc("/", DownloadImages)     // 设置访问的路由
+err := http.ListenAndServe(":8888", nil) // 设置监听的端口
+
+if err != nil {
+	log.Fatal("ListenAndServe: ", err)
+}
